@@ -1,0 +1,104 @@
+{{- if .Values.clickhouse.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-clickhouse-init
+data:
+  listen.xml: |
+    <clickhouse>
+      <listen_host>0.0.0.0</listen_host>
+    </clickhouse>
+  001_initial.sql: |
+    CREATE DATABASE IF NOT EXISTS uzip;
+    CREATE TABLE IF NOT EXISTS uzip.click_events (
+      event_id UUID, occurred_at DateTime64(3, 'UTC'), tenant_id UUID, link_id UUID,
+      alias LowCardinality(String), visitor_id FixedString(32), referrer String,
+      country LowCardinality(String), device LowCardinality(String), browser LowCardinality(String),
+      os LowCardinality(String), user_agent String, is_bot UInt8 DEFAULT 0, inserted_at DateTime DEFAULT now()
+    ) ENGINE = ReplacingMergeTree(inserted_at)
+    PARTITION BY toYYYYMM(occurred_at)
+    ORDER BY (tenant_id, link_id, occurred_at, event_id)
+    TTL toDateTime(occurred_at) + INTERVAL 13 MONTH DELETE;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+spec:
+  clusterIP: None
+  selector: { app.kubernetes.io/name: clickhouse, app.kubernetes.io/instance: {{ .Release.Name }} }
+  ports:
+    - { name: native, port: 9000 }
+    - { name: http, port: 8123 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}-clickhouse
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: clickhouse, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: clickhouse, app.kubernetes.io/instance: {{ .Release.Name }} }
+    spec:
+      securityContext: { fsGroup: 101 }
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:25.3-alpine
+          ports:
+            - { name: native, containerPort: 9000 }
+            - { name: http, containerPort: 8123 }
+          readinessProbe: { httpGet: { path: /ping, port: http }, initialDelaySeconds: 10 }
+          envFrom: [{ secretRef: { name: {{ .Release.Name }}-secrets } }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/clickhouse }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+            - { name: init, mountPath: /etc/clickhouse-server/config.d/listen.xml, subPath: listen.xml }
+          resources:
+            requests: { cpu: 250m, memory: 512Mi }
+            limits: { cpu: "2", memory: 2Gi }
+      volumes:
+        - name: init
+          configMap: { name: {{ .Release.Name }}-clickhouse-init }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: {{ .Values.clickhouse.storage }} } }
+{{- if .Values.clickhouse.backup.enabled }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ .Release.Name }}-clickhouse-backup
+spec:
+  schedule: {{ .Values.clickhouse.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: {{ .Release.Name }}
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: altinity/clickhouse-backup:2.6.39
+              command: ["/bin/sh","-ec"]
+              args:
+                - clickhouse-backup create_remote "scheduled-$(date +%Y%m%d-%H%M%S)"
+              env:
+                - { name: CLICKHOUSE_HOST, value: clickhouse }
+                - { name: CLICKHOUSE_PORT, value: "9000" }
+                - { name: REMOTE_STORAGE, value: s3 }
+                - { name: S3_BUCKET, value: {{ .Values.clickhouse.backup.bucket | quote }} }
+                - { name: S3_PATH, value: {{ .Release.Namespace | quote }} }
+                - { name: AWS_REGION, value: {{ .Values.awsRegion | quote }} }
+              envFrom: [{ secretRef: { name: {{ .Release.Name }}-secrets } }]
+{{- end }}
+{{- end }}

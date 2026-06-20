@@ -1,0 +1,105 @@
+openapi: 3.1.0
+info:
+  title: Uzip API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+security:
+  - bearerAuth: []
+paths:
+  /api/v1/links:
+    get:
+      summary: List links in the active tenant
+      parameters:
+        - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { in: query, name: offset, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200": { description: Link collection }
+    post:
+      summary: Create a short link
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLink"
+      responses:
+        "201": { description: Link created }
+        "409": { description: Alias already exists }
+        "422": { description: Invalid link }
+  /api/v1/links/{id}:
+    parameters:
+      - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Get a tenant-owned link
+      responses:
+        "200": { description: Link }
+        "404": { description: Not found }
+    delete:
+      summary: Archive a link
+      responses:
+        "204": { description: Archived }
+  /api/v1/api-keys:
+    get:
+      summary: List API key metadata
+      responses:
+        "200": { description: API keys }
+    post:
+      summary: Create an API key; its secret is returned once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties: { name: { type: string, maxLength: 80 } }
+      responses:
+        "201": { description: API key and one-time secret }
+  /api/v1/api-keys/{id}:
+    delete:
+      summary: Revoke an API key
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Revoked }
+  /api/v1/analytics/summary:
+    get:
+      servers: [{ url: http://localhost:8083 }]
+      summary: Get click and visitor totals
+      parameters:
+        - { in: query, name: link_id, schema: { type: string, format: uuid } }
+        - { in: query, name: from, schema: { type: string, format: date-time } }
+        - { in: query, name: to, schema: { type: string, format: date-time } }
+      responses:
+        "200": { description: Analytics summary }
+  /api/v1/analytics/timeseries:
+    get:
+      servers: [{ url: http://localhost:8083 }]
+      summary: Get bucketed click activity
+      parameters:
+        - { in: query, name: interval, schema: { type: string, enum: [hour, day, week] } }
+        - { in: query, name: link_id, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Time series }
+  /api/v1/analytics/breakdown/{dimension}:
+    get:
+      servers: [{ url: http://localhost:8083 }]
+      summary: Get a dimensional breakdown
+      parameters:
+        - { in: path, name: dimension, required: true, schema: { type: string, enum: [country, device, browser, os, referrer] } }
+        - { in: query, name: link_id, schema: { type: string, format: uuid } }
+      responses:
+        "200": { description: Breakdown }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  schemas:
+    CreateLink:
+      type: object
+      required: [destination]
+      properties:
+        destination: { type: string, format: uri }
+        alias: { type: string, minLength: 3, maxLength: 64 }
+        redirect_type: { type: integer, enum: [301, 302], default: 302 }
+        expires_at: { type: [string, "null"], format: date-time }

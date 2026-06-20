@@ -1,0 +1,31 @@
+{
+  "annotations": {"list":[]},
+  "editable": true,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "HTTP requests",
+      "targets": [{"expr":"sum by (instance) (rate(uzip_http_requests_total[5m]))","legendFormat":"{{instance}}"}],
+      "gridPos": {"h":8,"w":12,"x":0,"y":0}
+    },
+    {
+      "type": "stat",
+      "title": "Active requests",
+      "targets": [{"expr":"sum(uzip_http_active_requests)"}],
+      "gridPos": {"h":8,"w":6,"x":12,"y":0}
+    },
+    {
+      "type": "stat",
+      "title": "Errors",
+      "targets": [{"expr":"sum(uzip_errors_total)"}],
+      "gridPos": {"h":8,"w":6,"x":18,"y":0}
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["uzip"],
+  "templating": {"list":[]},
+  "time": {"from":"now-1h","to":"now"},
+  "title": "Uzip services",
+  "uid": "uzip-services",
+  "version": 1
+}

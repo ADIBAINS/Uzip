@@ -1,0 +1,19 @@
+global:
+  environment: staging
+  imageTag: REPLACE_BY_RELEASE_PIPELINE
+
+services:
+  control-api: { port: 8080, replicas: 1, public: true, minReplicas: 1, maxReplicas: 3 }
+  redirect: { port: 8081, replicas: 2, public: true, minReplicas: 2, maxReplicas: 6 }
+  event-processor: { port: 8082, replicas: 1, public: false, minReplicas: 1, maxReplicas: 3 }
+  analytics-api: { port: 8083, replicas: 1, public: true, minReplicas: 1, maxReplicas: 3 }
+
+externalSecrets:
+  remoteSecretName: uzip/staging/application
+
+config:
+  clickhouseSecure: false
+
+clickhouse:
+  enabled: true
+  storage: 20Gi

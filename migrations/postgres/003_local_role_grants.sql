@@ -1,0 +1,14 @@
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'uzip_app') THEN
+        CREATE ROLE uzip_app LOGIN PASSWORD 'change-me-in-production' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+    ELSE
+        ALTER ROLE uzip_app LOGIN PASSWORD 'change-me-in-production';
+    END IF;
+END
+$$;
+
+GRANT CONNECT ON DATABASE uzip TO uzip_app;
+GRANT USAGE ON SCHEMA public TO uzip_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO uzip_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO uzip_app;

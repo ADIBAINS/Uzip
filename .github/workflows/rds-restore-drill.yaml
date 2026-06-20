@@ -1,0 +1,25 @@
+name: RDS Restore Drill
+on:
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: read
+jobs:
+  restore:
+    environment: production
+    # Register this Linux runner in the AWS VPC; public hosted runners cannot query the restored private database.
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_RELEASE_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Restore, validate, and remove temporary RDS instance
+        env:
+          SOURCE_DB_IDENTIFIER: ${{ vars.RDS_IDENTIFIER }}
+          DB_SUBNET_GROUP: ${{ vars.DB_SUBNET_GROUP }}
+          VPC_SECURITY_GROUP_ID: ${{ vars.DATA_SECURITY_GROUP_ID }}
+          APPLICATION_SECRET_ID: ${{ vars.APPLICATION_SECRET_ID }}
+        run: bash scripts/rds-restore-drill.sh

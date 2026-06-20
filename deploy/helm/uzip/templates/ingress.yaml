@@ -1,0 +1,34 @@
+{{- if .Values.ingress.enabled }}
+{{- range $name, $host := .Values.ingress.hosts }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: {{ $.Values.ingress.groupName }}
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    external-dns.alpha.kubernetes.io/hostname: {{ $host }}
+{{- if $.Values.ingress.certificateArn }}
+    alb.ingress.kubernetes.io/certificate-arn: {{ $.Values.ingress.certificateArn }}
+{{- end }}
+{{- if $.Values.ingress.wafACLArn }}
+    alb.ingress.kubernetes.io/wafv2-acl-arn: {{ $.Values.ingress.wafACLArn }}
+{{- end }}
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  rules:
+    - host: {{ $host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $.Release.Name }}-{{ $name }}
+                port: { name: http }
+{{- end }}
+{{- end }}

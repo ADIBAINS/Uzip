@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: uzip
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - environment: staging
+            namespace: uzip-staging
+            values: values-staging.yaml
+          - environment: production
+            namespace: uzip-production
+            values: values-production.yaml
+  template:
+    metadata:
+      name: "uzip-{{environment}}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/adilbains/uzip.git
+        targetRevision: main
+        path: deploy/helm/uzip
+        helm:
+          valueFiles: ["{{values}}"]
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{namespace}}"
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: [CreateNamespace=true]

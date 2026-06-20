@@ -1,0 +1,11 @@
+.env
+.env.example
+*.out
+bin/
+web/node_modules/
+web/.next/
+web/tsconfig.tsbuildinfo
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log

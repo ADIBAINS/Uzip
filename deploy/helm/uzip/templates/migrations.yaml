@@ -1,0 +1,94 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-migrations
+  annotations: { argocd.argoproj.io/sync-wave: "-2" }
+data:
+  postgres.sql: |
+{{ .Files.Get "migrations/postgres.sql" | indent 4 }}
+  clickhouse.sql: |
+{{ .Files.Get "migrations/clickhouse.sql" | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-postgres-migrate-{{ .Release.Revision }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: postgres:17-alpine
+          envFrom:
+            - { configMapRef: { name: {{ .Release.Name }}-config } }
+            - { secretRef: { name: {{ .Release.Name }}-secrets } }
+          command: ["/bin/sh","-ec"]
+          args:
+            - |
+              psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 -f /migrations/postgres.sql
+              psql "$POSTGRES_ADMIN_URL" -v ON_ERROR_STOP=1 -v app_password="$APP_DATABASE_PASSWORD" \
+                -c "ALTER ROLE uzip_app LOGIN PASSWORD :'app_password'"
+          volumeMounts: [{ name: migrations, mountPath: /migrations }]
+      volumes: [{ name: migrations, configMap: { name: {{ .Release.Name }}-migrations } }]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-clickhouse-migrate-{{ .Release.Revision }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: clickhouse/clickhouse-server:25.3-alpine
+          envFrom:
+            - { configMapRef: { name: {{ .Release.Name }}-config } }
+            - { secretRef: { name: {{ .Release.Name }}-secrets } }
+          command: ["/bin/sh","-ec"]
+          args:
+            - |
+              SECURE_FLAG=""
+              if [ "$CLICKHOUSE_SECURE" = "true" ]; then SECURE_FLAG="--secure"; fi
+              clickhouse-client $SECURE_FLAG --host "$CLICKHOUSE_HOST" --port "${CLICKHOUSE_PORT:-9000}" \
+                --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --multiquery < /migrations/clickhouse.sql
+          volumeMounts: [{ name: migrations, mountPath: /migrations }]
+      volumes: [{ name: migrations, configMap: { name: {{ .Release.Name }}-migrations } }]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-kafka-topics-{{ .Release.Revision }}
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+spec:
+  backoffLimit: 5
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: {{ .Release.Name }}
+      restartPolicy: OnFailure
+      containers:
+        - name: topics
+          image: "{{ .Values.global.imageRegistry }}/uzip-topic-init:{{ required "global.imageTag is required" .Values.global.imageTag }}"
+          envFrom:
+            - { configMapRef: { name: {{ .Release.Name }}-config } }
+            - { secretRef: { name: {{ .Release.Name }}-secrets } }
+          env: [{ name: KAFKA_RETRY_TOPIC, value: clicks.retry.v1 }]
+{{- end }}

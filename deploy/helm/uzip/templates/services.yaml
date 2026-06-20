@@ -1,0 +1,98 @@
+{{- range $name, $service := .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+  labels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/instance: {{ $.Release.Name }} }
+  annotations: { argocd.argoproj.io/sync-wave: "2" }
+spec:
+  replicas: {{ $service.replicas }}
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+  selector:
+    matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/instance: {{ $.Release.Name }} }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/instance: {{ $.Release.Name }} }
+      annotations:
+        prometheus.io/scrape: {{ ternary "false" "true" (eq $name "dashboard") | quote }}
+        prometheus.io/path: /metrics
+        prometheus.io/port: {{ $service.port | quote }}
+    spec:
+      serviceAccountName: {{ ternary (printf "%s-web" $.Release.Name) $.Release.Name (eq $name "dashboard") }}
+      terminationGracePeriodSeconds: 30
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/instance: {{ $.Release.Name }} }
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+{{- if and $.Values.geoip.enabled (eq $name "event-processor") }}
+      initContainers:
+        - name: geoip-update
+          image: {{ $.Values.geoip.image }}
+          env:
+            - { name: GEOIPUPDATE_EDITION_IDS, value: GeoLite2-Country }
+            - { name: GEOIPUPDATE_ACCOUNT_ID, valueFrom: { secretKeyRef: { name: {{ $.Release.Name }}-secrets, key: MAXMIND_ACCOUNT_ID } } }
+            - { name: GEOIPUPDATE_LICENSE_KEY, valueFrom: { secretKeyRef: { name: {{ $.Release.Name }}-secrets, key: MAXMIND_LICENSE_KEY } } }
+            - { name: GEOIPUPDATE_DB_DIR, value: /var/lib/geoip }
+          volumeMounts: [{ name: geoip, mountPath: /var/lib/geoip }]
+{{- end }}
+      containers:
+        - name: {{ $name }}
+          image: "{{ $.Values.global.imageRegistry }}/uzip-{{ $name }}:{{ required "global.imageTag is required" $.Values.global.imageTag }}"
+          imagePullPolicy: {{ $.Values.global.imagePullPolicy }}
+          ports: [{ name: http, containerPort: {{ $service.port }} }]
+{{- if ne $name "dashboard" }}
+          envFrom:
+            - { configMapRef: { name: {{ $.Release.Name }}-config } }
+            - { secretRef: { name: {{ $.Release.Name }}-secrets } }
+{{- end }}
+          env: [{ name: PORT, value: {{ $service.port | quote }} }]
+          readinessProbe: { httpGet: { path: {{ ternary "/" "/ready" (eq $name "dashboard") }}, port: http }, initialDelaySeconds: 5, periodSeconds: 5 }
+          livenessProbe: { httpGet: { path: {{ ternary "/" "/live" (eq $name "dashboard") }}, port: http }, initialDelaySeconds: 15, periodSeconds: 10 }
+          resources:
+{{ toYaml $.Values.resources | indent 12 }}
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+{{- if and $.Values.geoip.enabled (eq $name "event-processor") }}
+          volumeMounts: [{ name: geoip, mountPath: /var/lib/geoip, readOnly: true }]
+{{- end }}
+{{- if and $.Values.geoip.enabled (eq $name "event-processor") }}
+      volumes: [{ name: geoip, emptyDir: {} }]
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+spec:
+  selector: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/instance: {{ $.Release.Name }} }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $.Release.Name }}-{{ $name }} }
+  minReplicas: {{ $service.minReplicas }}
+  maxReplicas: {{ $service.maxReplicas }}
+  behavior:
+    scaleUp: { stabilizationWindowSeconds: 30, policies: [{ type: Percent, value: 100, periodSeconds: 60 }] }
+    scaleDown: { stabilizationWindowSeconds: 300, policies: [{ type: Percent, value: 25, periodSeconds: 60 }] }
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: 65 }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $.Release.Name }}-{{ $name }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: {{ $name }}, app.kubernetes.io/instance: {{ $.Release.Name }} }
+{{- end }}

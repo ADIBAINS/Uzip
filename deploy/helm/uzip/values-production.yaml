@@ -1,0 +1,12 @@
+global:
+  environment: production
+  imageTag: REPLACE_BY_RELEASE_PIPELINE
+
+clickhouse:
+  enabled: false
+
+geoip:
+  enabled: true
+
+externalSecrets:
+  remoteSecretName: uzip/production/application

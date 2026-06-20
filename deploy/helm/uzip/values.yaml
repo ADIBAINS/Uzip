@@ -1,0 +1,97 @@
+global:
+  environment: production
+  imageRegistry: 000000000000.dkr.ecr.us-east-1.amazonaws.com
+  imageTag: dev
+  imagePullPolicy: IfNotPresent
+
+awsRegion: us-east-1
+serviceAccountRoleArn: ""
+
+services:
+  dashboard:
+    port: 3000
+    replicas: 2
+    minReplicas: 2
+    maxReplicas: 6
+  control-api:
+    port: 8080
+    replicas: 2
+    minReplicas: 2
+    maxReplicas: 6
+  redirect:
+    port: 8081
+    replicas: 3
+    minReplicas: 3
+    maxReplicas: 20
+  event-processor:
+    port: 8082
+    replicas: 2
+    minReplicas: 2
+    maxReplicas: 10
+  analytics-api:
+    port: 8083
+    replicas: 2
+    minReplicas: 2
+    maxReplicas: 8
+
+config:
+  kafkaIAM: true
+  clickhouseDatabase: uzip
+  clickhouseSecure: true
+  cognitoIssuer: ""
+  cognitoAudience: ""
+  redirectBaseURL: https://u.example.com
+  allowedOrigins: https://app.example.com
+  otelEndpoint: ""
+
+externalSecrets:
+  enabled: true
+  refreshInterval: 1h
+  secretStoreName: uzip-aws-secrets
+  remoteSecretName: uzip/production/application
+
+secrets:
+  # Used only when externalSecrets.enabled=false.
+  postgresURL: ""
+  redisURL: ""
+  kafkaBrokers: ""
+  clickhouseAddr: ""
+  clickhouseUser: default
+  clickhousePassword: ""
+
+geoip:
+  enabled: false
+  databasePath: /var/lib/geoip/GeoLite2-Country.mmdb
+  image: maxmindinc/geoipupdate:v7.1
+
+clickhouse:
+  # Production defaults to a managed external ClickHouse endpoint.
+  enabled: false
+  image: clickhouse/clickhouse-server:25.3-alpine
+  storage: 100Gi
+  backup:
+    enabled: false
+    schedule: "0 2 * * *"
+    bucket: ""
+
+migrations:
+  enabled: true
+
+ingress:
+  enabled: true
+  className: alb
+  certificateArn: ""
+  wafACLArn: ""
+  groupName: uzip
+  hosts:
+    dashboard: app.example.com
+    control-api: api.example.com
+    redirect: u.example.com
+    analytics-api: analytics.example.com
+
+networkPolicy:
+  enabled: true
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits: { cpu: 1000m, memory: 512Mi }

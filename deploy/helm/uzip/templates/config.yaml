@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  annotations: { argocd.argoproj.io/sync-wave: "-2" }
+data:
+  KAFKA_IAM: {{ .Values.config.kafkaIAM | quote }}
+  AWS_REGION: {{ .Values.awsRegion | quote }}
+  CLICKHOUSE_DATABASE: {{ .Values.config.clickhouseDatabase | quote }}
+  CLICKHOUSE_SECURE: {{ .Values.config.clickhouseSecure | quote }}
+  COGNITO_ISSUER: {{ .Values.config.cognitoIssuer | quote }}
+  COGNITO_AUDIENCE: {{ .Values.config.cognitoAudience | quote }}
+  REDIRECT_BASE_URL: {{ .Values.config.redirectBaseURL | quote }}
+  ALLOWED_ORIGINS: {{ .Values.config.allowedOrigins | quote }}
+  OTEL_EXPORTER_OTLP_ENDPOINT: {{ .Values.config.otelEndpoint | quote }}
+  DEV_AUTH: "false"
+{{- if .Values.geoip.enabled }}
+  GEOIP_DATABASE: {{ .Values.geoip.databasePath | quote }}
+{{- end }}
+{{- if not .Values.externalSecrets.enabled }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-secrets
+  annotations: { argocd.argoproj.io/sync-wave: "-2" }
+type: Opaque
+stringData:
+  POSTGRES_URL: {{ .Values.secrets.postgresURL | quote }}
+  REDIS_URL: {{ .Values.secrets.redisURL | quote }}
+  KAFKA_BROKERS: {{ .Values.secrets.kafkaBrokers | quote }}
+  CLICKHOUSE_ADDR: {{ .Values.secrets.clickhouseAddr | quote }}
+  CLICKHOUSE_USER: {{ .Values.secrets.clickhouseUser | quote }}
+  CLICKHOUSE_PASSWORD: {{ .Values.secrets.clickhousePassword | quote }}
+{{- end }}

@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: uzip
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - control-api:8080
+          - redirect:8081
+          - analytics-api:8083

@@ -1,0 +1,22 @@
+name: Staging Load Test
+on:
+  workflow_dispatch:
+    inputs:
+      base_url: { description: Redirect service URL, required: true }
+      alias: { description: Existing alias, required: true }
+      rate: { description: Requests per second, required: true, default: "1000" }
+permissions: { contents: read }
+jobs:
+  k6:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - uses: grafana/run-k6-action@v1
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          ALIAS: ${{ inputs.alias }}
+          RATE: ${{ inputs.rate }}
+          DURATION: 5m
+        with:
+          path: tests/load/redirect.js
