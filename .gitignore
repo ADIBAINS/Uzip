@@ -8,4 +8,5 @@ web/tsconfig.tsbuildinfo
 .terraform/
 *.tfstate
 *.tfstate.*
+docs/
 crash.log
