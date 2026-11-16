@@ -35,3 +35,11 @@ func TestAliasValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestReservedAliases(t *testing.T) {
+	for _, alias := range []string{"live", "ready", "metrics"} {
+		if validAlias(alias) {
+			t.Errorf("reserved alias %s accepted", alias)
+		}
+	}
+}

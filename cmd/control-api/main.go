@@ -217,8 +217,12 @@ func (a *api) getLink(w http.ResponseWriter, r *http.Request) {
 func (a *api) archiveLink(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.Principal(r.Context())
 	link, err := a.db.GetLink(r.Context(), principal.TenantID, r.PathValue("id"))
-	if err != nil {
+	if errors.Is(err, store.ErrNotFound) {
 		httpx.Error(w, 404, "not_found", "link not found")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, 500, "query_failed", "could not retrieve link")
 		return
 	}
 	if err := a.db.ArchiveLink(r.Context(), principal.TenantID, link.ID); err != nil {
@@ -242,6 +246,9 @@ func validateDestination(raw string) error {
 }
 
 func validAlias(alias string) bool {
+	if alias == "live" || alias == "ready" || alias == "metrics" {
+		return false
+	}
 	if len(alias) < 3 || len(alias) > 64 {
 		return false
 	}

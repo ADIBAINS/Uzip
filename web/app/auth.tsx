@@ -56,6 +56,7 @@ export async function getToken() {
   if (!refreshToken) return "";
   const response = await fetch(`${DOMAIN}/oauth2/token`, {
     method: "POST",
+    signal: AbortSignal.timeout(15000),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "refresh_token",
@@ -86,6 +87,7 @@ export async function completeLogin(code: string, returnedState: string) {
   });
   const response = await fetch(`${DOMAIN}/oauth2/token`, {
     method: "POST",
+    signal: AbortSignal.timeout(15000),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
   });
@@ -109,6 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     getToken()
       .then((token) => { if (token) setClaims(decode(token)); })
+      .catch(() => setClaims(undefined))
       .finally(() => setReady(true));
   }, []);
 
@@ -167,7 +170,8 @@ export function useAuth() {
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
+  const [error, setError] = useState("");
   if (!auth.ready) return <p className="empty">Loading session…</p>;
-  if (!auth.authenticated) return <section className="panel auth-panel"><p className="eyebrow">Secure workspace</p><h2>Sign in required</h2><p>{DEV_AUTH ? "Start a local demo session to continue." : "Use your organization account to continue."}</p><button onClick={auth.login}>{DEV_AUTH ? "Enter demo workspace" : "Sign in with Cognito"}</button></section>;
+  if (!auth.authenticated) return <section className="panel auth-panel"><p className="eyebrow">Secure workspace</p><h2>Sign in required</h2><p>{DEV_AUTH ? "Start a local demo session to continue." : "Use your organization account to continue."}</p>{error && <p role="alert" className="error">{error}</p>}<button onClick={() => auth.login().catch(e => setError(e.message))}>{DEV_AUTH ? "Enter demo workspace" : "Sign in with Cognito"}</button></section>;
   return children;
 }

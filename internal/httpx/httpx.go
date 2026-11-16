@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -45,6 +46,10 @@ func Decode(w http.ResponseWriter, r *http.Request, dst any) bool {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		Error(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return false
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		Error(w, http.StatusBadRequest, "invalid_request", "request must contain exactly one JSON value")
 		return false
 	}
 	return true

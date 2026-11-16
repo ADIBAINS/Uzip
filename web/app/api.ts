@@ -15,7 +15,10 @@ export async function api<T>(base: string, path: string, init?: RequestInit): Pr
   headers.set("Content-Type", "application/json");
   Object.entries(devHeaders).forEach(([key, value]) => headers.set(key, value));
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const response = await fetch(`${base}${path}`, { ...init, headers });
+  const signal = init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);
+  let response: Response;
+  try { response = await fetch(`${base}${path}`, { ...init, headers, signal }); }
+  catch { throw new Error("Unable to reach the service. Check your connection and try again."); }
   if (response.status === 401 && process.env.NEXT_PUBLIC_DEV_AUTH === "false") {
     localStorage.removeItem("uzip_id_token");
     localStorage.removeItem("uzip_refresh_token");

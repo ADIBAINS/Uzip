@@ -141,18 +141,12 @@ func (v *Verifier) key(ctx context.Context, kid string) (*rsa.PublicKey, error) 
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("jwks returned %s", response.Status)
 	}
-	var set struct {
-		Keys []struct {
-			KeyID, KeyType, Use, N, E string `json:"-"`
-		} `json:"keys"`
-	}
 	var raw struct {
 		Keys []map[string]string `json:"keys"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
-	_ = set
 	parsed := map[string]*rsa.PublicKey{}
 	for _, item := range raw.Keys {
 		nBytes, err := base64.RawURLEncoding.DecodeString(item["n"])

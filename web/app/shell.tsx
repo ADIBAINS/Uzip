@@ -16,10 +16,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname]);
+  useEffect(() => {
+    const close = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, []);
   const active = (href: string) => href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   return (
     <>
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <aside className={open ? "sidebar open" : "sidebar"}>
         <div className="sidebar-top">
           <Link href="/" className="brand" aria-label="Uzip overview">Uzip<span>.</span></Link>
@@ -28,7 +34,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </button>
         </div>
         <nav aria-label="Main navigation">
-          {links.map(link => <Link key={link.href} href={link.href} className={active(link.href) ? "active" : ""}>{link.label}</Link>)}
+          {links.map(link => <Link key={link.href} href={link.href} aria-current={active(link.href) ? "page" : undefined} className={active(link.href) ? "active" : ""}>{link.label}</Link>)}
         </nav>
         <div className="tenant">
           <div><strong>{auth.authenticated ? auth.claims?.email ?? "Demo Organization" : "Signed out"}</strong><br/><small>{auth.authenticated ? auth.claims?.["custom:role"] ?? "Owner" : "No active session"}</small></div>
@@ -36,7 +42,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       {open && <button className="backdrop" onClick={() => setOpen(false)} aria-label="Close navigation"/>}
-      <main>{children}</main>
+      <main id="main-content" tabIndex={-1}>{children}</main>
     </>
   );
 }

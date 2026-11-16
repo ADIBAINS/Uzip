@@ -26,3 +26,6 @@ web-dev:
 
 web-build:
 	cd web && npm run build
+
+.PHONY: verify
+verify: test vet build web-build
