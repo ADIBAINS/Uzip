@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strconv"
 	"time"
@@ -9,6 +10,8 @@ import (
 
 type Config struct {
 	Port             string
+	BindHost         string
+	RenderDemo       bool
 	PostgresURL      string
 	RedisURL         string
 	KafkaBrokers     string
@@ -34,6 +37,8 @@ type Config struct {
 func Load(defaultPort string) Config {
 	return Config{
 		Port:             env("PORT", defaultPort),
+		BindHost:         os.Getenv("BIND_HOST"),
+		RenderDemo:       envBool("UZIP_RENDER_DEMO", false),
 		PostgresURL:      env("POSTGRES_URL", "postgres://uzip:uzip@localhost:5432/uzip?sslmode=disable"),
 		RedisURL:         env("REDIS_URL", "redis://localhost:6379/0"),
 		KafkaBrokers:     env("KAFKA_BROKERS", "localhost:9092"),
@@ -57,7 +62,7 @@ func Load(defaultPort string) Config {
 	}
 }
 
-func (c Config) Addr() string { return ":" + c.Port }
+func (c Config) Addr() string { return net.JoinHostPort(c.BindHost, c.Port) }
 
 func (c Config) ValidateAuth() error {
 	if !c.DevAuth && (c.CognitoIssuer == "" || c.CognitoAudience == "") {

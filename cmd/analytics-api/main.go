@@ -11,11 +11,20 @@ import (
 	"github.com/adilbains/uzip/internal/auth"
 	"github.com/adilbains/uzip/internal/config"
 	"github.com/adilbains/uzip/internal/httpx"
+	"github.com/adilbains/uzip/internal/model"
 	"github.com/adilbains/uzip/internal/observability"
+	"github.com/adilbains/uzip/internal/store"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-type api struct{ store *analytics.Store }
+type analyticsReader interface {
+	Ping(context.Context) error
+	Summary(context.Context, string, string, time.Time, time.Time) (model.AnalyticsSummary, error)
+	TimeSeries(context.Context, string, string, string, time.Time, time.Time) ([]model.TimePoint, error)
+	Breakdown(context.Context, string, string, string, time.Time, time.Time) ([]model.Breakdown, error)
+}
+
+type api struct{ store analyticsReader }
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -30,15 +39,28 @@ func main() {
 		logger.Error("config", "error", err)
 		os.Exit(1)
 	}
-	store, err := analytics.Open(cfg.ClickHouseAddr, cfg.ClickHouseDB, cfg.ClickHouseUser, cfg.ClickHousePass, cfg.ClickHouseSecure)
-	if err != nil {
-		logger.Error("clickhouse", "error", err)
-		os.Exit(1)
+	app := &api{}
+	if cfg.RenderDemo {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		db, err := store.OpenPostgres(ctx, cfg.PostgresURL)
+		cancel()
+		if err != nil {
+			logger.Error("postgres", "error", err)
+			os.Exit(1)
+		}
+		defer db.Close()
+		app.store = db
+	} else {
+		db, err := analytics.Open(cfg.ClickHouseAddr, cfg.ClickHouseDB, cfg.ClickHouseUser, cfg.ClickHousePass, cfg.ClickHouseSecure)
+		if err != nil {
+			logger.Error("clickhouse", "error", err)
+			os.Exit(1)
+		}
+		defer db.Close()
+		app.store = db
 	}
-	defer store.Close()
-	app := &api{store: store}
 	mux := http.NewServeMux()
-	httpx.Health(mux, func() error { return store.Ping(context.Background()) })
+	httpx.Health(mux, func() error { return app.store.Ping(context.Background()) })
 	metrics := &httpx.Metrics{}
 	mux.Handle("GET /metrics", metrics.Handler())
 	protected := http.NewServeMux()

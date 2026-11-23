@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: uzip-demo
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./deploy/render/Dockerfile
+    healthCheckPath: /ready
+    envVars:
+      - key: POSTGRES_URL
+        fromDatabase:
+          name: uzip-demo-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: uzip-demo-cache
+          property: connectionString
+
+  - type: keyvalue
+    name: uzip-demo-cache
+    plan: free
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+databases:
+  - name: uzip-demo-db
+    databaseName: uzip
+    plan: free
+    region: singapore
+    ipAllowList: []
