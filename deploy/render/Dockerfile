@@ -24,7 +24,7 @@ RUN apk add --no-cache bash tini
 WORKDIR /app
 COPY --from=backend /out/ /usr/local/bin/
 COPY --from=dashboard --chown=node:node /app/ ./
-COPY migrations/postgres/001_initial.sql deploy/render/schema.sql /migrations/
+COPY migrations/postgres/001_initial.sql migrations/postgres/004_link_notifications.sql deploy/render/schema.sql /migrations/
 COPY deploy/render/start.sh /usr/local/bin/uzip-start
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

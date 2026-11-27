@@ -17,11 +17,13 @@ import (
 type Publisher struct{ writer *kafka.Writer }
 
 type Config struct {
-	Brokers string
-	Topic   string
-	Group   string
-	IAM     bool
-	Region  string
+	Brokers         string
+	Topic           string
+	Group           string
+	IAM             bool
+	Region          string
+	Async           bool
+	OnDeliveryError func(int, error)
 }
 
 func NewPublisher(config Config) *Publisher {
@@ -30,11 +32,19 @@ func NewPublisher(config Config) *Publisher {
 		transport.TLS = &tls.Config{MinVersion: tls.VersionTLS12}
 		transport.SASL = oauthMechanism{region: config.Region}
 	}
-	return &Publisher{writer: &kafka.Writer{
+	writer := &kafka.Writer{
 		Addr: kafka.TCP(strings.Split(config.Brokers, ",")...), Topic: config.Topic, Transport: transport,
-		Balancer: &kafka.Hash{}, BatchTimeout: 10 * time.Millisecond, RequiredAcks: kafka.RequireOne,
-		Async: true,
-	}}
+		Balancer: &kafka.Hash{}, BatchTimeout: 10 * time.Millisecond, RequiredAcks: kafka.RequireAll,
+		Async: config.Async,
+	}
+	if config.OnDeliveryError != nil {
+		writer.Completion = func(messages []kafka.Message, err error) {
+			if err != nil {
+				config.OnDeliveryError(len(messages), err)
+			}
+		}
+	}
+	return &Publisher{writer: writer}
 }
 
 func (p *Publisher) Publish(ctx context.Context, event model.ClickEvent) error {

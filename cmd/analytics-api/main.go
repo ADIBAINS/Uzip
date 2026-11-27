@@ -39,6 +39,12 @@ func main() {
 		logger.Error("config", "error", err)
 		os.Exit(1)
 	}
+	cache, err := store.OpenCache(cfg.RedisURL)
+	if err != nil {
+		logger.Error("redis", "error", err)
+		os.Exit(1)
+	}
+	defer cache.Close()
 	app := &api{}
 	if cfg.RenderDemo {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -67,7 +73,7 @@ func main() {
 	protected.HandleFunc("GET /api/v1/analytics/summary", app.summary)
 	protected.HandleFunc("GET /api/v1/analytics/timeseries", app.timeseries)
 	protected.HandleFunc("GET /api/v1/analytics/breakdown/{dimension}", app.breakdown)
-	mux.Handle("/api/", auth.NewVerifier(cfg.CognitoIssuer, cfg.CognitoAudience, cfg.DevAuth).Middleware(protected))
+	mux.Handle("/api/", auth.NewVerifier(cfg.CognitoIssuer, cfg.CognitoAudience, cfg.DevAuth).Middleware(auth.RateLimit(protected, cache.RateLimit)))
 	root := otelhttp.NewHandler(httpx.CORS(cfg.AllowedOrigins, metrics.Middleware(httpx.Recover(logger, httpx.Log(logger, mux)))), "http.server")
 	if err := httpx.Serve(cfg.Addr(), root, cfg.ShutdownTimeout, logger); err != nil {
 		logger.Error("server", "error", err)

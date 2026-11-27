@@ -61,6 +61,22 @@ func Principal(ctx context.Context) (model.Principal, bool) {
 	return p, ok
 }
 
+func RateLimit(mux *http.ServeMux, limit func(context.Context, string, int, time.Duration) (time.Duration, error)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, _ := Principal(r.Context())
+		handler, pattern := mux.Handler(r)
+		if pattern == "" {
+			handler.ServeHTTP(w, r)
+			return
+		}
+		key := "user:" + p.TenantID + ":" + p.UserID + ":" + pattern
+		if delay, err := limit(r.Context(), key, 300, time.Minute); err == nil && httpx.RateLimited(w, delay) {
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
 func RequireRole(roles ...string) func(http.Handler) http.Handler {
 	allowed := map[string]bool{}
 	for _, role := range roles {
@@ -83,15 +99,16 @@ type jwtHeader struct {
 	KeyID     string `json:"kid"`
 }
 type jwtClaims struct {
-	Subject  string `json:"sub"`
-	Issuer   string `json:"iss"`
-	Audience any    `json:"aud"`
-	ClientID string `json:"client_id"`
-	Expires  int64  `json:"exp"`
-	Email    string `json:"email"`
-	TenantID string `json:"custom:tenant_id"`
-	Role     string `json:"custom:role"`
-	TokenUse string `json:"token_use"`
+	Subject       string `json:"sub"`
+	Issuer        string `json:"iss"`
+	Audience      any    `json:"aud"`
+	ClientID      string `json:"client_id"`
+	Expires       int64  `json:"exp"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	TenantID      string `json:"custom:tenant_id"`
+	Role          string `json:"custom:role"`
+	TokenUse      string `json:"token_use"`
 }
 
 func (v *Verifier) verify(ctx context.Context, token string) (model.Principal, error) {
@@ -122,7 +139,7 @@ func (v *Verifier) verify(ctx context.Context, token string) (model.Principal, e
 	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature); err != nil {
 		return model.Principal{}, err
 	}
-	return model.Principal{UserID: claims.Subject, TenantID: claims.TenantID, Role: defaultString(claims.Role, "member"), Email: claims.Email}, nil
+	return model.Principal{UserID: claims.Subject, TenantID: claims.TenantID, Role: defaultString(claims.Role, "member"), Email: claims.Email, EmailVerified: claims.EmailVerified}, nil
 }
 
 func (v *Verifier) key(ctx context.Context, kid string) (*rsa.PublicKey, error) {

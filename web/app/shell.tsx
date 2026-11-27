@@ -9,6 +9,7 @@ const links = [
   { href: "/", label: "Overview" },
   { href: "/links", label: "Links" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/notifications", label: "Notifications" },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -42,7 +43,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       {open && <button className="backdrop" onClick={() => setOpen(false)} aria-label="Close navigation"/>}
-      <main id="main-content" tabIndex={-1}>{children}</main>
+      <main id="main-content" tabIndex={-1}>
+        {auth.error && <p className="error" role="alert">{auth.error}</p>}
+        {children}
+      </main>
     </>
   );
 }

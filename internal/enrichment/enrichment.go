@@ -12,6 +12,8 @@ import (
 
 var botPattern = regexp.MustCompile(`(?i)(bot|crawler|spider|slurp|bingpreview|facebookexternalhit|headless|python-requests|curl/|wget/)`)
 
+func IsBot(userAgent string) bool { return botPattern.MatchString(userAgent) }
+
 type Enricher struct{ geo *geoip2.Reader }
 
 func Open(geoDatabase string) (*Enricher, error) {
@@ -71,7 +73,7 @@ func (e *Enricher) Apply(event *model.ClickEvent) {
 	if parsed, err := url.Parse(event.Referrer); err == nil {
 		event.Referrer = parsed.Hostname()
 	}
-	event.IsBot = botPattern.MatchString(event.UserAgent)
+	event.IsBot = IsBot(event.UserAgent)
 	if e.geo != nil {
 		if ip := net.ParseIP(event.IPAddress); ip != nil {
 			if record, err := e.geo.Country(ip); err == nil {

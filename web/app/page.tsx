@@ -2,17 +2,25 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ANALYTICS_API, api } from "./api";
+import { graphql } from "./api";
 import { AuthGuard } from "./auth";
 
 type Summary = { total_clicks: number; unique_visitors: number };
 
 export default function Home() {
+  return <AuthGuard><Overview /></AuthGuard>;
+}
+
+function Overview() {
   const [summary, setSummary] = useState<Summary>();
   const [error, setError] = useState("");
-  useEffect(() => { api<{data: Summary}>(ANALYTICS_API, "/api/v1/analytics/summary").then(result => setSummary(result.data)).catch(e => setError(e.message)); }, []);
+  useEffect(() => {
+    graphql<{ analyticsSummary: Summary }>("query Overview { analyticsSummary { total_clicks unique_visitors } }")
+      .then(result => setSummary(result.analyticsSummary))
+      .catch(reason => setError(reason.message));
+  }, []);
   return (
-    <AuthGuard>
+    <>
       <header className="page-header"><div><p className="eyebrow">Workspace overview</p><h1>Short links.<br/>Clear signals.</h1></div><Link className="button" href="/links">Create a link</Link></header>
       {error && <p className="error" role="alert">{error}</p>}
       <section className="grid three">
@@ -24,6 +32,6 @@ export default function Home() {
         <p className="eyebrow">Getting started</p><h2>From long URL to useful signal</h2>
         <div className="steps"><div><b>01</b><span>Create a memorable alias</span></div><div><b>02</b><span>Share the short URL</span></div><div><b>03</b><span>Explore click analytics</span></div></div>
       </section>
-    </AuthGuard>
+    </>
   );
 }

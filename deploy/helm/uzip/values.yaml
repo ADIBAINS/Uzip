@@ -58,6 +58,9 @@ secrets:
   clickhouseAddr: ""
   clickhouseUser: default
   clickhousePassword: ""
+  notificationWebhookURL: ""
+  notificationWebhookToken: ""
+  notificationWebhookFormat: webhook
 
 geoip:
   enabled: false

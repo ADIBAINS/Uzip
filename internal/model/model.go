@@ -3,10 +3,18 @@ package model
 import "time"
 
 type Principal struct {
-	UserID   string
-	TenantID string
-	Role     string
-	Email    string
+	UserID        string
+	TenantID      string
+	Role          string
+	Email         string
+	EmailVerified bool
+}
+
+func (p Principal) VerifiedEmail() string {
+	if p.EmailVerified {
+		return p.Email
+	}
+	return ""
 }
 
 type Tenant struct {
@@ -37,6 +45,16 @@ type CreateLink struct {
 	Destination string     `json:"destination"`
 	Redirect    int        `json:"redirect_type"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
+type Notification struct {
+	ID        string     `json:"id"`
+	LinkID    *string    `json:"link_id,omitempty"`
+	Alias     string     `json:"alias"`
+	Kind      string     `json:"kind"`
+	Milestone int        `json:"milestone,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 type ClickEvent struct {

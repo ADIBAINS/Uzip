@@ -32,4 +32,7 @@ stringData:
   CLICKHOUSE_ADDR: {{ .Values.secrets.clickhouseAddr | quote }}
   CLICKHOUSE_USER: {{ .Values.secrets.clickhouseUser | quote }}
   CLICKHOUSE_PASSWORD: {{ .Values.secrets.clickhousePassword | quote }}
+  NOTIFICATION_WEBHOOK_URL: {{ .Values.secrets.notificationWebhookURL | quote }}
+  NOTIFICATION_WEBHOOK_TOKEN: {{ .Values.secrets.notificationWebhookToken | quote }}
+  NOTIFICATION_WEBHOOK_FORMAT: {{ .Values.secrets.notificationWebhookFormat | quote }}
 {{- end }}

@@ -120,3 +120,9 @@ The repository includes production implementations for Cognito PKCE login, dashb
 ## License
 
 Released under the [MIT License](LICENSE).
+
+## Project review and design
+
+The dashboard serves teams managing short links and inspecting human traffic. It sends GraphQL requests to the same-origin gateway at `/api/graphql`. That gateway calls the control and analytics services internally. Public links use the redirect service, and API clients can still use the REST endpoints. Go entry points live in `cmd/`, shared packages in `internal/`, and the Next.js App Router in `web/app/`. SQL migrations initialize both stores. Terraform, Helm and GitHub workflows support optional AWS deployment.
+
+The dashboard uses Cognito authorization code with PKCE and a Redis-backed session. The browser receives an opaque HttpOnly, SameSite cookie. HTTPS deployments set Secure on the session cookie. In local Compose or on the public demo, select **Enter demo workspace** to start a demo session. See the [gateway schema](web/app/server/graphql.ts) and [session and notification setup](docs/runbook.md#dashboard-sessions-and-notifications).

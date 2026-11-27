@@ -7,14 +7,30 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /api/v1/session:
+    get:
+      summary: Get the identity and workspace verified from the presented credential
+      responses:
+        "200": { description: Verified principal }
+        "401": { description: Missing or invalid credential }
+  /api/v1/notifications:
+    get:
+      summary: List the 50 most recent notifications for the authenticated workspace member
+      responses:
+        "200": { description: Notification inbox }
   /api/v1/links:
     get:
       summary: List links in the active tenant
       parameters:
+        - in: query
+          name: query
+          description: Case-insensitive substring of the alias or destination, up to 512 UTF-8 bytes
+          schema: { type: string }
         - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100 } }
         - { in: query, name: offset, schema: { type: integer, minimum: 0 } }
       responses:
         "200": { description: Link collection }
+        "422": { description: Invalid search query }
     post:
       summary: Create a short link
       requestBody:

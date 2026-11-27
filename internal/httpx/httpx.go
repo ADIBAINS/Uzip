@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,6 +40,16 @@ func CORS(origins string, next http.Handler) http.Handler {
 
 func Error(w http.ResponseWriter, status int, code, message string) {
 	JSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+}
+
+func RateLimited(w http.ResponseWriter, delay time.Duration) bool {
+	if delay <= 0 {
+		return false
+	}
+	seconds := (delay + time.Second - 1) / time.Second
+	w.Header().Set("Retry-After", strconv.FormatInt(int64(seconds), 10))
+	Error(w, http.StatusTooManyRequests, "rate_limited", "request limit exceeded")
+	return true
 }
 
 func Decode(w http.ResponseWriter, r *http.Request, dst any) bool {

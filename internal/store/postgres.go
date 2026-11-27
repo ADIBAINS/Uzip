@@ -29,9 +29,9 @@ func OpenPostgres(ctx context.Context, url string) (*Postgres, error) {
 func (p *Postgres) Close()                         { p.Pool.Close() }
 func (p *Postgres) Ping(ctx context.Context) error { return p.Pool.Ping(ctx) }
 
-func (p *Postgres) CreateLink(ctx context.Context, tenantID string, input model.CreateLink) (model.Link, error) {
-	link := model.Link{ID: uuid.NewString(), TenantID: tenantID, Alias: input.Alias, Destination: input.Destination, Redirect: input.Redirect, ExpiresAt: input.ExpiresAt}
-	tx, err := p.tenantTx(ctx, tenantID)
+func (p *Postgres) CreateLink(ctx context.Context, principal model.Principal, input model.CreateLink) (model.Link, error) {
+	link := model.Link{ID: uuid.NewString(), TenantID: principal.TenantID, Alias: input.Alias, Destination: input.Destination, Redirect: input.Redirect, ExpiresAt: input.ExpiresAt}
+	tx, err := p.tenantTx(ctx, principal.TenantID)
 	if err != nil {
 		return link, err
 	}
@@ -42,13 +42,27 @@ func (p *Postgres) CreateLink(ctx context.Context, tenantID string, input model.
 		RETURNING created_at, updated_at`,
 		link.ID, link.TenantID, link.Alias, link.Destination, link.Redirect, link.ExpiresAt,
 	).Scan(&link.CreatedAt, &link.UpdatedAt)
-	if err == nil {
-		err = tx.Commit(ctx)
+	if err != nil {
+		return link, err
 	}
-	return link, err
+	if principal.UserID != "" {
+		_, err = tx.Exec(ctx, `
+			WITH target AS (
+				INSERT INTO link_notification_targets (link_id, tenant_id, recipient_id, recipient_email, alias, expires_at)
+				VALUES ($1,$2,$3,$4,$5,$6)
+				RETURNING link_id, tenant_id, recipient_id, recipient_email, alias
+			)
+			INSERT INTO link_notifications (link_id, tenant_id, recipient_id, recipient_email, alias, kind)
+			SELECT link_id, tenant_id, recipient_id, recipient_email, alias, 'created' FROM target`,
+			link.ID, link.TenantID, principal.UserID, principal.VerifiedEmail(), link.Alias, link.ExpiresAt)
+		if err != nil {
+			return link, err
+		}
+	}
+	return link, tx.Commit(ctx)
 }
 
-func (p *Postgres) ListLinks(ctx context.Context, tenantID string, limit, offset int) ([]model.Link, error) {
+func (p *Postgres) ListLinks(ctx context.Context, tenantID, search string, limit, offset int) ([]model.Link, error) {
 	tx, err := p.tenantTx(ctx, tenantID)
 	if err != nil {
 		return nil, err
@@ -56,7 +70,9 @@ func (p *Postgres) ListLinks(ctx context.Context, tenantID string, limit, offset
 	defer tx.Rollback(ctx)
 	rows, err := tx.Query(ctx, `
 		SELECT id, tenant_id, alias, destination, redirect_type, expires_at, archived_at, created_at, updated_at
-		FROM links WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`, tenantID, limit, offset)
+		FROM links WHERE tenant_id=$1
+		AND ($2='' OR strpos(lower(alias), lower($2)) > 0 OR strpos(lower(destination), lower($2)) > 0)
+		ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4`, tenantID, search, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -108,20 +124,25 @@ func (p *Postgres) ResolveAlias(ctx context.Context, alias string) (model.Link, 
 	return link, err
 }
 
-func (p *Postgres) ArchiveLink(ctx context.Context, tenantID, id string) error {
+func (p *Postgres) ArchiveLink(ctx context.Context, tenantID, id string) (model.Link, error) {
 	tx, err := p.tenantTx(ctx, tenantID)
 	if err != nil {
-		return err
+		return model.Link{}, err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE links SET archived_at=now(), updated_at=now() WHERE tenant_id=$1 AND id=$2`, tenantID, id)
-	if err == nil && tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
+	link, err := scanLink(tx.QueryRow(ctx, `
+		UPDATE links SET archived_at=COALESCE(archived_at, now()),
+			updated_at=CASE WHEN archived_at IS NULL THEN now() ELSE updated_at END
+		WHERE tenant_id=$1 AND id=$2
+		RETURNING id, tenant_id, alias, destination, redirect_type, expires_at, archived_at, created_at, updated_at`,
+		tenantID, id))
 	if err != nil {
-		return err
+		return model.Link{}, err
 	}
-	return tx.Commit(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE link_notification_targets SET canceled=true WHERE link_id=$1 AND NOT canceled`, link.ID); err != nil {
+		return link, err
+	}
+	return link, tx.Commit(ctx)
 }
 
 func (p *Postgres) CreateAPIKey(ctx context.Context, tenantID, name, prefix string, hash []byte) (model.APIKey, error) {

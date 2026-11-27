@@ -14,11 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/adilbains/uzip/internal/auth"
 	"github.com/adilbains/uzip/internal/config"
 	"github.com/adilbains/uzip/internal/httpx"
 	"github.com/adilbains/uzip/internal/model"
+	"github.com/adilbains/uzip/internal/notifications"
 	"github.com/adilbains/uzip/internal/observability"
 	"github.com/adilbains/uzip/internal/store"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -65,6 +67,22 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	worker, err := notifications.NewWorker(db, os.Getenv("NOTIFICATION_WEBHOOK_URL"),
+		os.Getenv("NOTIFICATION_WEBHOOK_TOKEN"), os.Getenv("NOTIFICATION_WEBHOOK_FORMAT"), logger)
+	if err != nil {
+		logger.Error("notification worker", "error", err)
+		os.Exit(1)
+	}
+	workerCtx, stopWorker := context.WithCancel(context.Background())
+	workerDone := make(chan struct{})
+	go func() {
+		defer close(workerDone)
+		worker.Run(workerCtx)
+	}()
+	defer func() {
+		stopWorker()
+		<-workerDone
+	}()
 
 	handler := &api{db: db, cache: cache, baseURL: cfg.RedirectBaseURL, renderDemo: cfg.RenderDemo}
 	mux := http.NewServeMux()
@@ -73,6 +91,8 @@ func main() {
 	mux.Handle("GET /metrics", metrics.Handler())
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /api/v1/links", handler.listLinks)
+	protected.HandleFunc("GET /api/v1/session", handler.session)
+	protected.HandleFunc("GET /api/v1/notifications", handler.listNotifications)
 	protected.HandleFunc("POST /api/v1/links", handler.createLink)
 	protected.HandleFunc("GET /api/v1/links/{id}", handler.getLink)
 	protected.Handle("DELETE /api/v1/links/{id}", auth.RequireRole("owner", "admin")(http.HandlerFunc(handler.archiveLink)))
@@ -80,7 +100,7 @@ func main() {
 	protected.Handle("POST /api/v1/api-keys", auth.RequireRole("owner", "admin")(http.HandlerFunc(handler.createAPIKey)))
 	protected.Handle("DELETE /api/v1/api-keys/{id}", auth.RequireRole("owner", "admin")(http.HandlerFunc(handler.revokeAPIKey)))
 	verifier := auth.NewVerifier(cfg.CognitoIssuer, cfg.CognitoAudience, cfg.DevAuth)
-	mux.Handle("/api/", verifier.Middleware(rateLimit(cache, protected)))
+	mux.Handle("/api/", verifier.Middleware(auth.RateLimit(protected, cache.RateLimit)))
 	root := otelhttp.NewHandler(httpx.CORS(cfg.AllowedOrigins, metrics.Middleware(httpx.Recover(logger, httpx.Log(logger, mux)))), "http.server")
 	if err := httpx.Serve(cfg.Addr(), root, cfg.ShutdownTimeout, logger); err != nil {
 		logger.Error("server", "error", err)
@@ -140,19 +160,6 @@ func (a *api) revokeAPIKey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func rateLimit(cache *store.Cache, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		principal, _ := auth.Principal(r.Context())
-		allowed, err := cache.Allow(r.Context(), "control:"+principal.TenantID, 300, time.Minute)
-		if err == nil && !allowed {
-			w.Header().Set("Retry-After", "60")
-			httpx.Error(w, http.StatusTooManyRequests, "rate_limited", "request limit exceeded")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.Principal(r.Context())
 	var input model.CreateLink
@@ -187,25 +194,48 @@ func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnprocessableEntity, "invalid_alias", "alias must contain 3-64 lowercase letters, numbers, hyphens, or underscores")
 		return
 	}
-	link, err := a.db.CreateLink(r.Context(), principal.TenantID, input)
+	link, err := a.db.CreateLink(r.Context(), principal, input)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if err := a.db.RecordCreationFailure(r.Context(), principal, input.Alias); err != nil {
+				slog.Warn("record link creation failure", "error", err)
+			}
 			httpx.Error(w, http.StatusConflict, "alias_taken", "alias already exists")
 			return
 		}
 		httpx.Error(w, http.StatusInternalServerError, "create_failed", "could not create link")
 		return
 	}
-	_ = a.cache.SetLink(r.Context(), link)
 	httpx.JSON(w, http.StatusCreated, map[string]any{"data": link, "short_url": strings.TrimRight(a.baseURL, "/") + "/" + link.Alias})
+}
+
+func (a *api) session(w http.ResponseWriter, r *http.Request) {
+	p, _ := auth.Principal(r.Context())
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.JSON(w, http.StatusOK, map[string]string{"sub": p.UserID, "email": p.Email, "custom:tenant_id": p.TenantID, "custom:role": p.Role})
+}
+
+func (a *api) listNotifications(w http.ResponseWriter, r *http.Request) {
+	p, _ := auth.Principal(r.Context())
+	entries, err := a.db.ListNotifications(r.Context(), p)
+	if err != nil {
+		httpx.Error(w, 500, "query_failed", "could not list notifications")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"data": entries})
 }
 
 func (a *api) listLinks(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.Principal(r.Context())
 	limit := clampInt(r.URL.Query().Get("limit"), 20, 1, 100)
 	offset := clampInt(r.URL.Query().Get("offset"), 0, 0, 100000)
-	links, err := a.db.ListLinks(r.Context(), principal.TenantID, limit, offset)
+	search := strings.TrimSpace(r.URL.Query().Get("query"))
+	if len(search) > 512 || !utf8.ValidString(search) || strings.ContainsRune(search, 0) {
+		httpx.Error(w, http.StatusUnprocessableEntity, "invalid_query", "search must be valid text of at most 512 bytes")
+		return
+	}
+	links, err := a.db.ListLinks(r.Context(), principal.TenantID, search, limit, offset)
 	if err != nil {
 		httpx.Error(w, 500, "query_failed", "could not list links")
 		return
@@ -229,20 +259,20 @@ func (a *api) getLink(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) archiveLink(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.Principal(r.Context())
-	link, err := a.db.GetLink(r.Context(), principal.TenantID, r.PathValue("id"))
+	link, err := a.db.ArchiveLink(r.Context(), principal.TenantID, r.PathValue("id"))
 	if errors.Is(err, store.ErrNotFound) {
 		httpx.Error(w, 404, "not_found", "link not found")
 		return
 	}
 	if err != nil {
-		httpx.Error(w, 500, "query_failed", "could not retrieve link")
-		return
-	}
-	if err := a.db.ArchiveLink(r.Context(), principal.TenantID, link.ID); err != nil {
 		httpx.Error(w, 500, "archive_failed", "could not archive link")
 		return
 	}
-	_ = a.cache.Delete(r.Context(), link.Alias)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Second)
+	defer cancel()
+	if err := a.cache.CacheArchivedLink(ctx, link); err != nil {
+		slog.Warn("could not invalidate archived link", "alias", link.Alias, "error", err)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

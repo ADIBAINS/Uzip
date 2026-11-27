@@ -19,6 +19,8 @@ export PGOPTIONS="-c role=uzip_app"
 export UZIP_RENDER_DEMO=true DEV_AUTH=true
 export REDIRECT_BASE_URL="${RENDER_EXTERNAL_URL:-http://localhost:${PORT:-10000}}/s"
 export ALLOWED_ORIGINS="${RENDER_EXTERNAL_URL:-http://localhost:${PORT:-10000}}"
+export CONTROL_API_URL=http://127.0.0.1:8080 ANALYTICS_API_URL=http://127.0.0.1:8083
+export UZIP_DASHBOARD_ORIGIN="${UZIP_DASHBOARD_ORIGIN:-$ALLOWED_ORIGINS}"
 pids=()
 
 stop() {

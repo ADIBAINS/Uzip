@@ -76,3 +76,26 @@ locals {
   redirect_domain  = var.domain_name == "" ? "" : "u.${var.domain_name}"
   analytics_domain = var.domain_name == "" ? "" : "analytics.${var.domain_name}"
 }
+
+variable "notification_webhook_url" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Optional notification delivery webhook URL."
+}
+variable "notification_webhook_token" {
+  type        = string
+  default     = ""
+  sensitive   = true
+  description = "Optional bearer token for the notification delivery webhook."
+}
+
+variable "notification_webhook_format" {
+  type        = string
+  default     = "webhook"
+  description = "Notification delivery protocol, webhook or novu."
+  validation {
+    condition     = contains(["webhook", "novu"], var.notification_webhook_format)
+    error_message = "Notification webhook format must be webhook or novu."
+  }
+}

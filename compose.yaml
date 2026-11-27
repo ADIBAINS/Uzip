@@ -20,9 +20,10 @@ services:
     image: postgres:17-alpine
     environment:
       PGPASSWORD: uzip
-    command: ["psql", "-h", "postgres", "-U", "uzip", "-d", "uzip", "-v", "ON_ERROR_STOP=1", "-f", "/init/003_local_role_grants.sql"]
+    command: ["psql", "-h", "postgres", "-U", "uzip", "-d", "uzip", "-v", "ON_ERROR_STOP=1", "-f", "/init/003_local_role_grants.sql", "-f", "/init/004_link_notifications.sql"]
     volumes:
       - ./migrations/postgres/003_local_role_grants.sql:/init/003_local_role_grants.sql:ro
+      - ./migrations/postgres/004_link_notifications.sql:/init/004_link_notifications.sql:ro
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -102,6 +103,9 @@ services:
       DEV_AUTH: "true"
       REDIRECT_BASE_URL: http://localhost:8081
       ALLOWED_ORIGINS: http://localhost:${UZIP_DASHBOARD_PORT:-3000}
+      NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
+      NOTIFICATION_WEBHOOK_TOKEN: ${NOTIFICATION_WEBHOOK_TOKEN:-}
+      NOTIFICATION_WEBHOOK_FORMAT: ${NOTIFICATION_WEBHOOK_FORMAT:-webhook}
     ports: ["8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -131,6 +135,7 @@ services:
       <<: *service-env
       PORT: "8082"
     depends_on:
+      postgres-role-init: { condition: service_completed_successfully }
       kafka: { condition: service_healthy }
       kafka-init: { condition: service_completed_successfully }
       clickhouse: { condition: service_healthy }
@@ -150,6 +155,10 @@ services:
 
   dashboard:
     build: ./web
+    environment:
+      CONTROL_API_URL: http://control-api:8080
+      ANALYTICS_API_URL: http://analytics-api:8083
+      REDIS_URL: redis://redis:6379/0
     ports: ["${UZIP_DASHBOARD_PORT:-3000}:3000"]
     depends_on:
       - control-api

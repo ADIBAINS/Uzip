@@ -31,6 +31,9 @@ func (p *Postgres) RecordDemoClick(ctx context.Context, event model.ClickEvent) 
 	if err != nil {
 		return err
 	}
+	if err := recordNotificationClick(ctx, tx, event); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
 

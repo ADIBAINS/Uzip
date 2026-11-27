@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/adilbains/uzip/internal/config"
@@ -27,10 +26,10 @@ import (
 )
 
 type redirector struct {
-	db            *store.Postgres
-	cache         *store.Cache
-	publish       func(context.Context, model.ClickEvent) error
-	publishErrors atomic.Uint64
+	db      *store.Postgres
+	cache   *store.Cache
+	clicks  chan model.ClickEvent
+	metrics *httpx.Metrics
 }
 
 func main() {
@@ -56,7 +55,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer cache.Close()
-	app := &redirector{db: db, cache: cache}
+	metrics := &httpx.Metrics{}
+	app := &redirector{db: db, cache: cache, clicks: make(chan model.ClickEvent, 1024), metrics: metrics}
+	var publish func(context.Context, model.ClickEvent) error
 	if cfg.RenderDemo {
 		enricher, err := enrichment.Open("")
 		if err != nil {
@@ -64,21 +65,28 @@ func main() {
 			os.Exit(1)
 		}
 		defer enricher.Close()
-		app.publish = func(ctx context.Context, event model.ClickEvent) error {
+		publish = func(ctx context.Context, event model.ClickEvent) error {
 			enricher.Apply(&event)
 			event.Referrer = ""
-			ctx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
-			defer cancel()
 			return db.RecordDemoClick(ctx, event)
 		}
 	} else {
-		publisher := events.NewPublisher(events.Config{Brokers: cfg.KafkaBrokers, Topic: cfg.KafkaTopic, IAM: cfg.KafkaIAM, Region: cfg.AWSRegion})
+		publisher := events.NewPublisher(events.Config{
+			Brokers: cfg.KafkaBrokers, Topic: cfg.KafkaTopic, IAM: cfg.KafkaIAM, Region: cfg.AWSRegion, Async: true,
+			OnDeliveryError: func(count int, err error) {
+				metrics.AddErrors(uint64(count))
+				logger.Warn("click delivery failed", "count", count, "error", err)
+			},
+		})
 		defer publisher.Close()
-		app.publish = publisher.Publish
+		publish = publisher.Publish
 	}
+	clickContext, stopClicks := context.WithCancel(context.Background())
+	defer stopClicks()
+	drained := make(chan struct{})
+	go app.publishClicks(clickContext, drained, publish, logger)
 	mux := http.NewServeMux()
 	httpx.Health(mux, func() error { return db.Ping(context.Background()) })
-	metrics := &httpx.Metrics{}
 	mux.Handle("GET /metrics", metrics.Handler())
 	mux.HandleFunc("GET /{alias}", app.redirect)
 	root := otelhttp.NewHandler(metrics.Middleware(httpx.Recover(logger, httpx.Log(logger, mux))), "redirect")
@@ -86,14 +94,21 @@ func main() {
 		logger.Error("server", "error", err)
 		os.Exit(1)
 	}
+	close(app.clicks)
+	timer := time.NewTimer(cfg.ShutdownTimeout)
+	defer timer.Stop()
+	select {
+	case <-drained:
+	case <-timer.C:
+		stopClicks()
+		<-drained
+	}
 }
 
 func (a *redirector) redirect(w http.ResponseWriter, r *http.Request) {
 	alias := strings.ToLower(r.PathValue("alias"))
-	allowed, rateErr := a.cache.Allow(r.Context(), "redirect:"+clientIP(r), 300, time.Minute)
-	if rateErr == nil && !allowed {
-		w.Header().Set("Retry-After", "60")
-		httpx.Error(w, http.StatusTooManyRequests, "rate_limited", "request limit exceeded")
+	delay, rateErr := a.cache.RateLimit(r.Context(), "redirect:"+clientIP(r), 300, time.Minute)
+	if rateErr == nil && httpx.RateLimited(w, delay) {
 		return
 	}
 	link, found, err := a.cache.GetLink(r.Context(), alias)
@@ -103,7 +118,6 @@ func (a *redirector) redirect(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		link, err = a.db.ResolveAlias(r.Context(), alias)
 		if errors.Is(err, store.ErrNotFound) {
-			_ = a.cache.SetMissing(r.Context(), alias)
 			http.NotFound(w, r)
 			return
 		}
@@ -111,9 +125,9 @@ func (a *redirector) redirect(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, 503, "resolution_failed", "link resolution unavailable")
 			return
 		}
-		_ = a.cache.SetLink(r.Context(), link)
+		_ = a.cache.CacheResolvedLink(r.Context(), link)
 	}
-	if err != nil || !link.Active(time.Now()) {
+	if !link.Active(time.Now()) {
 		httpx.Error(w, http.StatusGone, "link_inactive", "link is expired or archived")
 		return
 	}
@@ -124,11 +138,29 @@ func (a *redirector) redirect(w http.ResponseWriter, r *http.Request) {
 		LinkID: link.ID, Alias: link.Alias, VisitorID: visitorID(r), IPAddress: clientIP(r),
 		UserAgent: r.UserAgent(), Referrer: r.Referer(), TraceParent: carrier.Get("traceparent"),
 	}
-	if err := a.publish(context.Background(), event); err != nil {
-		a.publishErrors.Add(1)
+	select {
+	case a.clicks <- event:
+	default:
+		a.metrics.Error()
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, link.Destination, link.Redirect)
+}
+
+func (a *redirector) publishClicks(ctx context.Context, drained chan<- struct{}, publish func(context.Context, model.ClickEvent) error, logger *slog.Logger) {
+	defer close(drained)
+	for event := range a.clicks {
+		if ctx.Err() != nil {
+			return
+		}
+		eventContext, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+		err := publish(eventContext, event)
+		cancel()
+		if err != nil {
+			a.metrics.Error()
+			logger.Warn("could not queue click for delivery", "event_id", event.EventID, "error", err)
+		}
+	}
 }
 
 func clientIP(r *http.Request) string {

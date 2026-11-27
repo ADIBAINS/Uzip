@@ -49,7 +49,15 @@ spec:
             - { configMapRef: { name: {{ $.Release.Name }}-config } }
             - { secretRef: { name: {{ $.Release.Name }}-secrets } }
 {{- end }}
-          env: [{ name: PORT, value: {{ $service.port | quote }} }]
+          env:
+            - { name: PORT, value: {{ $service.port | quote }} }
+{{- if eq $name "dashboard" }}
+            - { name: CONTROL_API_URL, value: {{ printf "http://%s-control-api" $.Release.Name | quote }} }
+            - { name: ANALYTICS_API_URL, value: {{ printf "http://%s-analytics-api" $.Release.Name | quote }} }
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef: { name: {{ $.Release.Name }}-secrets, key: REDIS_URL }
+{{- end }}
           readinessProbe: { httpGet: { path: {{ ternary "/" "/ready" (eq $name "dashboard") }}, port: http }, initialDelaySeconds: 5, periodSeconds: 5 }
           livenessProbe: { httpGet: { path: {{ ternary "/" "/live" (eq $name "dashboard") }}, port: http }, initialDelaySeconds: 15, periodSeconds: 10 }
           resources:

@@ -23,6 +23,8 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 
 func (m *Metrics) Error() { m.errors.Add(1) }
 
+func (m *Metrics) AddErrors(count uint64) { m.errors.Add(count) }
+
 func (m *Metrics) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")

@@ -169,6 +169,8 @@ resource "aws_cognito_user_pool_client" "dashboard" {
   allowed_oauth_flows                  = ["code"]
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   supported_identity_providers         = ["COGNITO"]
+  read_attributes                      = ["email", "email_verified", "custom:tenant_id", "custom:role"]
+  write_attributes                     = ["email"]
   callback_urls = compact([
     "http://localhost:3000/auth/callback",
     var.domain_name == "" ? "" : "https://${local.app_domain}/auth/callback"

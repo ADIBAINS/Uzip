@@ -27,12 +27,16 @@ func migrate(ctx context.Context, databaseURL, directory string) error {
 	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS render_schema_migrations (version integer PRIMARY KEY)`); err != nil {
 		return err
 	}
-	var applied bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM render_schema_migrations WHERE version = 1)`).Scan(&applied); err != nil {
-		return err
-	}
-	if !applied {
-		for _, name := range []string{"001_initial.sql", "schema.sql"} {
+	for i, files := range [][]string{{"001_initial.sql", "schema.sql"}, {"004_link_notifications.sql"}} {
+		version := i + 1
+		var applied bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM render_schema_migrations WHERE version = $1)`, version).Scan(&applied); err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+		for _, name := range files {
 			sql, err := os.ReadFile(filepath.Join(directory, name))
 			if err != nil {
 				return err
@@ -41,7 +45,7 @@ func migrate(ctx context.Context, databaseURL, directory string) error {
 				return fmt.Errorf("apply %s: %w", name, err)
 			}
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO render_schema_migrations VALUES (1)`); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO render_schema_migrations VALUES ($1)`, version); err != nil {
 			return err
 		}
 	}
