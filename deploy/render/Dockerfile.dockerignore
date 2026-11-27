@@ -1,0 +1,9 @@
+.git
+.env*
+**/.env*
+web/node_modules
+web/.next
+web/*.tsbuildinfo
+infra
+docs
+output

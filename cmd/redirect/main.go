@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/adilbains/uzip/internal/config"
+	"github.com/adilbains/uzip/internal/enrichment"
 	"github.com/adilbains/uzip/internal/events"
 	"github.com/adilbains/uzip/internal/httpx"
 	"github.com/adilbains/uzip/internal/model"
@@ -28,7 +29,7 @@ import (
 type redirector struct {
 	db            *store.Postgres
 	cache         *store.Cache
-	publisher     *events.Publisher
+	publish       func(context.Context, model.ClickEvent) error
 	publishErrors atomic.Uint64
 }
 
@@ -55,9 +56,26 @@ func main() {
 		os.Exit(1)
 	}
 	defer cache.Close()
-	publisher := events.NewPublisher(events.Config{Brokers: cfg.KafkaBrokers, Topic: cfg.KafkaTopic, IAM: cfg.KafkaIAM, Region: cfg.AWSRegion})
-	defer publisher.Close()
-	app := &redirector{db: db, cache: cache, publisher: publisher}
+	app := &redirector{db: db, cache: cache}
+	if cfg.RenderDemo {
+		enricher, err := enrichment.Open("")
+		if err != nil {
+			logger.Error("enrichment", "error", err)
+			os.Exit(1)
+		}
+		defer enricher.Close()
+		app.publish = func(ctx context.Context, event model.ClickEvent) error {
+			enricher.Apply(&event)
+			event.Referrer = ""
+			ctx, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+			defer cancel()
+			return db.RecordDemoClick(ctx, event)
+		}
+	} else {
+		publisher := events.NewPublisher(events.Config{Brokers: cfg.KafkaBrokers, Topic: cfg.KafkaTopic, IAM: cfg.KafkaIAM, Region: cfg.AWSRegion})
+		defer publisher.Close()
+		app.publish = publisher.Publish
+	}
 	mux := http.NewServeMux()
 	httpx.Health(mux, func() error { return db.Ping(context.Background()) })
 	metrics := &httpx.Metrics{}
@@ -106,7 +124,7 @@ func (a *redirector) redirect(w http.ResponseWriter, r *http.Request) {
 		LinkID: link.ID, Alias: link.Alias, VisitorID: visitorID(r), IPAddress: clientIP(r),
 		UserAgent: r.UserAgent(), Referrer: r.Referer(), TraceParent: carrier.Get("traceparent"),
 	}
-	if err := a.publisher.Publish(context.Background(), event); err != nil {
+	if err := a.publish(context.Background(), event); err != nil {
 		a.publishErrors.Add(1)
 	}
 	w.Header().Set("Cache-Control", "no-store")

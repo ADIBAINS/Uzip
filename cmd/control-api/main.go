@@ -26,9 +26,10 @@ import (
 )
 
 type api struct {
-	db      *store.Postgres
-	cache   *store.Cache
-	baseURL string
+	db         *store.Postgres
+	cache      *store.Cache
+	baseURL    string
+	renderDemo bool
 }
 
 func main() {
@@ -59,10 +60,13 @@ func main() {
 	}
 	defer cache.Close()
 	if cfg.DevAuth {
-		_ = db.EnsureDevelopmentTenant(ctx)
+		if err := db.EnsureDevelopmentTenant(ctx); err != nil {
+			logger.Error("seed development team", "error", err)
+			os.Exit(1)
+		}
 	}
 
-	handler := &api{db: db, cache: cache, baseURL: cfg.RedirectBaseURL}
+	handler := &api{db: db, cache: cache, baseURL: cfg.RedirectBaseURL, renderDemo: cfg.RenderDemo}
 	mux := http.NewServeMux()
 	httpx.Health(mux, func() error { return db.Ping(context.Background()) })
 	metrics := &httpx.Metrics{}
@@ -158,6 +162,15 @@ func (a *api) createLink(w http.ResponseWriter, r *http.Request) {
 	if err := validateDestination(input.Destination); err != nil {
 		httpx.Error(w, http.StatusUnprocessableEntity, "invalid_destination", err.Error())
 		return
+	}
+	if a.renderDemo {
+		destination, _ := url.ParseRequestURI(input.Destination)
+		host := strings.ToLower(destination.Hostname())
+		if destination.User != nil || destination.Port() != "" ||
+			(host != "example.com" && host != "example.org" && host != "example.net") {
+			httpx.Error(w, http.StatusUnprocessableEntity, "demo_destination", "Try a URL on example.com, example.org, or example.net in the public demo.")
+			return
+		}
 	}
 	if input.Redirect == 0 {
 		input.Redirect = http.StatusFound
